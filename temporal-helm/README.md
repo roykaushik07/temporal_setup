@@ -214,6 +214,48 @@ ui:
       - temporal-ui.your-company.com
 ```
 
+## Security & Access Control
+
+Temporal supports two types of access control (both **optional** and **disabled by default**):
+
+### Type 1: UI Access Control
+
+Control who can access the Temporal Web UI:
+
+- **Basic Authentication** - Simple username/password at Ingress level
+- **OAuth/OIDC** - Corporate SSO (Okta, Azure AD, Google)
+- **LDAP/Active Directory** - Direct LDAP integration
+
+Example (Basic Auth):
+```yaml
+security:
+  ui:
+    authentication:
+      enabled: true
+      basicAuth:
+        enabled: true
+        existingSecret: "temporal-ui-basic-auth"
+```
+
+### Type 2: Server Access Control
+
+Control which workers can connect to Temporal server:
+
+- **Namespace Isolation** - Logical separation (recommended for starting)
+- **Mutual TLS (mTLS)** - Certificate-based authentication
+
+Example (Namespace Isolation):
+```yaml
+security:
+  server:
+    authentication:
+      enabled: false
+      namespaceIsolation:
+        enabled: true  # Always available, zero overhead
+```
+
+**For detailed security setup instructions, see [docs/SECURITY.md](docs/SECURITY.md)**
+
 ## Connecting Workers
 
 Your Python workers (or other language SDKs) connect to Temporal server:
@@ -221,7 +263,10 @@ Your Python workers (or other language SDKs) connect to Temporal server:
 ### From Inside Kubernetes
 
 ```python
-client = await Client.connect("temporal-server.temporal.svc.cluster.local:7233")
+client = await Client.connect(
+    "temporal-server.temporal.svc.cluster.local:7233",
+    namespace="default"  # Specify namespace for isolation
+)
 ```
 
 ### From Outside Kubernetes
@@ -229,7 +274,10 @@ client = await Client.connect("temporal-server.temporal.svc.cluster.local:7233")
 Use port-forward or LoadBalancer service:
 
 ```python
-client = await Client.connect("temporal.your-company.com:7233")
+client = await Client.connect(
+    "temporal.your-company.com:7233",
+    namespace="default"
+)
 ```
 
 ## Upgrading
@@ -354,15 +402,30 @@ helm uninstall temporal -n temporal
 - Kubernetes secrets
 - PersistentVolumeClaims (if any)
 
-## Future Enhancements
+## Features
+
+### Implemented
+- ✅ Custom Docker images from Nexus
+- ✅ External PostgreSQL (AWS RDS)
+- ✅ Temporal Server deployment
+- ✅ Temporal UI deployment
+- ✅ Ingress support for UI
+- ✅ **Security & Access Control:**
+  - ✅ UI Authentication (Basic Auth, OAuth/OIDC, LDAP)
+  - ✅ Server Authentication (Namespace Isolation, mTLS)
+- ✅ Configurable resources and replicas
+- ✅ Health checks (liveness/readiness probes)
+- ✅ High availability configurations
+
+### Future Enhancements
 
 Planned features (not yet implemented):
 - [ ] Schema setup init job
-- [ ] LDAP/AD authentication
-- [ ] Monitoring/metrics integration
+- [ ] Prometheus ServiceMonitor integration
+- [ ] Grafana dashboard templates
 - [ ] Worker deployment template
-- [ ] TLS/mTLS support
 - [ ] Multi-region support
+- [ ] Auto-scaling (HPA) configurations
 
 ## Architecture
 
