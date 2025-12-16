@@ -1,0 +1,54 @@
+{{- if .Values.ui.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "temporal.fullname" . }}-ui
+  labels:
+    {{- include "temporal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+  annotations:
+    {{- /* User-provided annotations */}}
+    {{- with .Values.ui.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- /* Basic Auth annotations (if enabled) */}}
+    {{- if and .Values.security.ui.authentication.enabled .Values.security.ui.authentication.basicAuth.enabled }}
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: {{ .Values.security.ui.authentication.basicAuth.existingSecret }}
+    nginx.ingress.kubernetes.io/auth-realm: "Temporal UI - Authentication Required"
+    {{- end }}
+    {{- /* OAuth/OIDC annotations (if enabled) */}}
+    {{- if and .Values.security.ui.authentication.enabled .Values.security.ui.authentication.oauth.enabled }}
+    nginx.ingress.kubernetes.io/auth-url: "https://oauth2-proxy.{{ .Release.Namespace }}.svc.cluster.local/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://oauth2-proxy.{{ .Release.Namespace }}.svc.cluster.local/oauth2/start?rd=$escaped_request_uri"
+    {{- end }}
+spec:
+  {{- if .Values.ui.ingress.className }}
+  ingressClassName: {{ .Values.ui.ingress.className }}
+  {{- end }}
+  {{- if .Values.ui.ingress.tls }}
+  tls:
+    {{- range .Values.ui.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ui.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "temporal.fullname" $ }}-ui
+                port:
+                  number: {{ $.Values.ui.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

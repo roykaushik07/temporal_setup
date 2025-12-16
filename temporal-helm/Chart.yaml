@@ -1,0 +1,16 @@
+apiVersion: v2
+name: temporal
+description: Temporal workflow orchestration platform - custom deployment
+type: application
+version: 1.0.0
+appVersion: "1.24.2"
+keywords:
+  - temporal
+  - workflow
+  - orchestration
+home: https://temporal.io
+sources:
+  - https://github.com/temporalio/temporal
+maintainers:
+  - name: Your Team
+    email: team@yourcompany.com

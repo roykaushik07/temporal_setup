@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "temporal.fullname" . }}-server-config
+  labels:
+    {{- include "temporal.labels" . | nindent 4 }}
+data:
+  development.yaml: |
+    log:
+      stdout: true
+      level: info
+
+    persistence:
+      defaultStore: default
+      visibilityStore: visibility
+      numHistoryShards: 512
+      datastores:
+        default:
+          sql:
+            pluginName: postgres12
+            databaseName: {{ .Values.database.external.defaultDatabase }}
+            connectAddr: {{ .Values.database.external.host }}:{{ .Values.database.external.port }}
+            connectProtocol: tcp
+            user: {{ .Values.database.external.user }}
+            password: "{{ `${DB_PASSWORD}` }}"
+            maxConns: 20
+            maxIdleConns: 20
+            {{- if .Values.database.external.ssl.enabled }}
+            tls:
+              enabled: true
+              sslMode: {{ .Values.database.external.ssl.mode }}
+            {{- end }}
+        visibility:
+          sql:
+            pluginName: postgres12
+            databaseName: {{ .Values.database.external.visibilityDatabase }}
+            connectAddr: {{ .Values.database.external.host }}:{{ .Values.database.external.port }}
+            connectProtocol: tcp
+            user: {{ .Values.database.external.user }}
+            password: "{{ `${DB_PASSWORD}` }}"
+            maxConns: 10
+            maxIdleConns: 10
+            {{- if .Values.database.external.ssl.enabled }}
+            tls:
+              enabled: true
+              sslMode: {{ .Values.database.external.ssl.mode }}
+            {{- end }}
+
+    clusterMetadata:
+      enableGlobalNamespace: false
+      failoverVersionIncrement: 10
+      masterClusterName: "active"
+      currentClusterName: "active"
+      clusterInformation:
+        active:
+          enabled: true
+          initialFailoverVersion: 1
+          rpcName: "frontend"
+          rpcAddress: "localhost:7233"
+
+    services:
+      frontend:
+        rpc:
+          grpcPort: 7233
+          membershipPort: 6933
+          bindOnLocalHost: false
+          {{- if and .Values.security.server.authentication.enabled .Values.security.server.authentication.mtls.enabled }}
+          # mTLS Configuration
+          tls:
+            certFile: /etc/temporal/certs/server/tls.crt
+            keyFile: /etc/temporal/certs/server/tls.key
+            caFile: /etc/temporal/certs/ca/ca.crt
+            {{- if .Values.security.server.authentication.mtls.requireClientAuth }}
+            clientAuth: RequireAndVerifyClientCert
+            {{- else }}
+            clientAuth: VerifyClientCertIfGiven
+            {{- end }}
+            serverName: {{ .Values.security.server.authentication.mtls.frontend.serverName }}
+          {{- end }}
+
+      matching:
+        rpc:
+          grpcPort: 7235
+          membershipPort: 6935
+          bindOnLocalHost: false
+
+      history:
+        rpc:
+          grpcPort: 7234
+          membershipPort: 6934
+          bindOnLocalHost: false
+
+      worker:
+        rpc:
+          grpcPort: 7239
+          membershipPort: 6939
+          bindOnLocalHost: false

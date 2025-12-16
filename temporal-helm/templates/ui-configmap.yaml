@@ -1,0 +1,14 @@
+{{- if .Values.ui.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "temporal.fullname" . }}-ui-config
+  labels:
+    {{- include "temporal.labels" . | nindent 4 }}
+data:
+  development.yaml: |
+    temporalGrpcAddress: {{ include "temporal.fullname" . }}-server:7233
+    host: 0.0.0.0
+    port: 8080
+    enableUi: true
+{{- end }}

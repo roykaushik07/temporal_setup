@@ -1,0 +1,381 @@
+# Default values for Temporal HELM chart
+# This is a YAML-formatted file declaring variables to pass to templates
+
+## Global settings
+global:
+  # Image pull secrets for private registries (Nexus)
+  imagePullSecrets: []
+  # - name: nexus-registry-secret
+
+## Temporal Server configuration
+server:
+  enabled: true
+
+  image:
+    repository: your-nexus-url/temporal-server
+    tag: "1.24.2"
+    pullPolicy: IfNotPresent
+
+  replicas: 3
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    ports:
+      frontend: 7233
+      metrics: 9090
+
+  # Health checks
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+## Temporal UI configuration
+ui:
+  enabled: true
+
+  image:
+    repository: your-nexus-url/temporal-ui
+    tag: "2.30.0"
+    pullPolicy: IfNotPresent
+
+  replicas: 2
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  # Ingress configuration for UI
+  ingress:
+    enabled: false
+    className: "nginx"
+    annotations: {}
+      # cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: temporal-ui.your-domain.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+      # - secretName: temporal-ui-tls
+      #   hosts:
+      #     - temporal-ui.your-domain.com
+
+## Database configuration
+database:
+  # Database type (currently only PostgreSQL supported)
+  type: postgresql
+
+  # External database (AWS RDS in production)
+  external:
+    enabled: true
+    host: ""  # RDS endpoint - e.g., temporal-db.xxxxx.us-east-1.rds.amazonaws.com
+    port: 5432
+
+    # Database names
+    defaultDatabase: temporal
+    visibilityDatabase: temporal_visibility
+
+    # Credentials (use existingSecret in production)
+    user: temporal
+    password: ""  # Leave empty, use existingSecret
+
+    # Reference to existing Kubernetes secret containing credentials
+    # Secret should have keys: username, password
+    existingSecret: ""  # e.g., temporal-db-credentials
+
+    # SSL/TLS configuration
+    ssl:
+      enabled: false
+      mode: require  # disable, allow, prefer, require, verify-ca, verify-full
+
+  # Schema setup configuration
+  schema:
+    # Run schema setup as init job before server starts
+    setup:
+      enabled: true
+      # Download schema files from Temporal GitHub
+      schemaVersion: "1.24.2"
+
+    # Schema update/migration
+    update:
+      enabled: false  # Set to true for upgrades
+
+## ============================================================================
+## SECURITY CONFIGURATION - Access Control
+## ============================================================================
+## Two types of access control:
+##   1. UI Access - Who can view/use the Temporal Web UI
+##   2. Server Access - Which workers can connect to Temporal server
+##
+## All security features are OPTIONAL and DISABLED by default.
+## Enable only what you need for your environment.
+## ============================================================================
+
+security:
+  # ---------------------------------------------------------------------------
+  # Type 1: UI Access Control
+  # ---------------------------------------------------------------------------
+  # Controls who can access the Temporal Web UI
+  #
+  ui:
+    authentication:
+      # Master switch for UI authentication (default: false)
+      enabled: false
+
+      # --- Option A: Basic Authentication (Simplest) ---
+      # Username/password at Ingress level
+      # Good for: Internal tools, dev/staging environments
+      #
+      # Setup:
+      #   1. Create htpasswd file:
+      #      htpasswd -c auth admin
+      #   2. Create secret:
+      #      kubectl create secret generic temporal-ui-basic-auth \
+      #        --from-file=auth=auth -n temporal
+      #   3. Enable below:
+      basicAuth:
+        enabled: false
+        # Kubernetes secret name containing htpasswd file
+        existingSecret: "temporal-ui-basic-auth"
+        # Key in secret containing the htpasswd data
+        secretKey: "auth"
+
+      # --- Option B: OAuth/OIDC (Corporate SSO) ---
+      # Integrate with corporate identity provider (Okta, Azure AD, Google)
+      # Good for: Production with existing SSO
+      # Requires: oauth2-proxy deployment (see docs/SECURITY.md)
+      #
+      # Setup:
+      #   1. Deploy oauth2-proxy (separate HELM chart or deployment)
+      #   2. Create secret with OAuth credentials:
+      #      kubectl create secret generic temporal-oauth \
+      #        --from-literal=client-id=xxx \
+      #        --from-literal=client-secret=yyy \
+      #        --from-literal=cookie-secret=zzz -n temporal
+      #   3. Configure and enable below:
+      oauth:
+        enabled: false
+        # OAuth provider (google, github, azure, okta, oidc)
+        provider: "oidc"
+        # OIDC issuer URL (e.g., https://accounts.google.com)
+        issuerUrl: ""
+        # Client ID from your OAuth provider
+        clientId: ""
+        # Kubernetes secret containing OAuth credentials
+        # Secret keys: client-id, client-secret, cookie-secret
+        existingSecret: "temporal-oauth"
+        # Email domains to allow (empty = allow all)
+        emailDomains: []
+          # - yourcompany.com
+
+      # --- Option C: LDAP/Active Directory (UI-level) ---
+      # UI connects directly to LDAP/AD server
+      # Good for: Environments with LDAP infrastructure
+      # Note: This is UI-level auth, not Ingress-level
+      #
+      # Setup:
+      #   1. Create secret with LDAP bind password:
+      #      kubectl create secret generic temporal-ldap \
+      #        --from-literal=bind-password=xxx -n temporal
+      #   2. Configure and enable below:
+      ldap:
+        enabled: false
+        # LDAP server host and port
+        host: ""  # e.g., ldap.yourcompany.com
+        port: 389
+        # Use TLS for LDAP connection
+        useTLS: false
+        # Base DN for LDAP searches
+        baseDN: ""  # e.g., dc=yourcompany,dc=com
+        # Service account for LDAP bind
+        bindDN: ""  # e.g., cn=temporal-svc,ou=serviceaccounts,dc=yourcompany,dc=com
+        # User search configuration
+        userSearchBase: ""  # e.g., ou=users,dc=yourcompany,dc=com
+        userSearchFilter: "(&(objectClass=user)(sAMAccountName={0}))"
+        # Kubernetes secret containing LDAP credentials
+        # Secret key: bind-password
+        existingSecret: "temporal-ldap"
+
+  # ---------------------------------------------------------------------------
+  # Type 2: Server Access Control
+  # ---------------------------------------------------------------------------
+  # Controls which workers/clients can connect to Temporal server
+  #
+  server:
+    authentication:
+      # Master switch for server authentication (default: false)
+      enabled: false
+
+      # --- Option A: Namespace Isolation (Recommended for starting) ---
+      # Logical separation between teams/applications
+      # Workers must specify namespace when connecting
+      # No authentication overhead, just organizational boundaries
+      #
+      # Benefits:
+      #   - Zero performance impact
+      #   - Built into Temporal
+      #   - Easy to manage
+      #
+      # Example worker code:
+      #   client = await Client.connect("temporal:7233", namespace="team-a")
+      #
+      namespaceIsolation:
+        # Always available (just create namespaces as needed)
+        # This flag is informational only
+        enabled: true
+        # Note: Create namespaces via:
+        #   kubectl exec -it <temporal-pod> -- tctl namespace register <name>
+        # Or via Temporal CLI/SDK
+
+      # --- Option B: Mutual TLS (mTLS) ---
+      # Strongest security - requires client certificates
+      # Good for: Production with strict security requirements
+      # Workers must present valid certificates signed by your CA
+      #
+      # Setup:
+      #   1. Create Certificate Authority (CA) or use existing
+      #   2. Generate server certificate:
+      #      openssl req -new -x509 -days 365 -key server.key -out server.crt
+      #   3. Generate client certificates for each worker
+      #   4. Create secrets:
+      #      kubectl create secret generic temporal-ca \
+      #        --from-file=ca.crt=ca.crt -n temporal
+      #      kubectl create secret tls temporal-server-tls \
+      #        --cert=server.crt --key=server.key -n temporal
+      #   5. Enable and configure below:
+      mtls:
+        enabled: false
+        # Require client certificates for all connections
+        requireClientAuth: true
+
+        # Certificate Authority (CA)
+        ca:
+          # Kubernetes secret containing CA certificate
+          # Secret key: ca.crt
+          existingSecret: "temporal-ca"
+
+        # Server certificate and key
+        serverCert:
+          # Kubernetes secret of type 'tls' with server certificate
+          # Secret keys: tls.crt, tls.key
+          existingSecret: "temporal-server-tls"
+
+        # Frontend service TLS settings
+        frontend:
+          # Server name for TLS (DNS name in certificate)
+          serverName: "temporal-server"
+
+        # Worker must provide client certificate
+        # Client cert setup in worker code:
+        #   client = await Client.connect(
+        #     "temporal:7233",
+        #     tls=TLSConfig(
+        #       client_cert=b"...",
+        #       client_private_key=b"..."
+        #     )
+        #   )
+
+## ============================================================================
+## MONITORING & OBSERVABILITY (Optional)
+## ============================================================================
+monitoring:
+  enabled: false
+
+  # Prometheus metrics
+  prometheus:
+    enabled: false
+    # ServiceMonitor for Prometheus Operator
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      scrapeTimeout: 10s
+      labels: {}
+
+  # Grafana dashboards
+  grafana:
+    enabled: false
+    # Reference to ConfigMap containing dashboard JSON
+    dashboardsConfigMap: ""
+
+## Worker deployment template (optional)
+worker:
+  # Enable generic worker deployment template
+  enabled: false
+
+  # This is a template that teams can customize
+  # for their specific workflow workers
+  image:
+    repository: your-nexus-url/your-worker-image
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  replicas: 2
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+  # Task queue this worker listens to
+  taskQueue: "default-task-queue"
+
+  # Environment variables for worker
+  env: []
+    # - name: LOG_LEVEL
+    #   value: "info"
+
+## Pod-level configurations
+podAnnotations: {}
+podSecurityContext: {}
+  # fsGroup: 2000
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+## Node selection
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+## ServiceAccount
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use
+  name: ""

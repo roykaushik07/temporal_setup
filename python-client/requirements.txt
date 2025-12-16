@@ -1,0 +1,5 @@
+# Temporal Python SDK
+temporalio==1.7.1
+
+# Additional useful libraries
+python-dotenv==1.0.0

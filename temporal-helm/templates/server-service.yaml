@@ -1,0 +1,23 @@
+{{- if .Values.server.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "temporal.fullname" . }}-server
+  labels:
+    {{- include "temporal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  type: {{ .Values.server.service.type }}
+  ports:
+  - port: {{ .Values.server.service.ports.frontend }}
+    targetPort: frontend
+    protocol: TCP
+    name: frontend
+  - port: {{ .Values.server.service.ports.metrics }}
+    targetPort: metrics
+    protocol: TCP
+    name: metrics
+  selector:
+    {{- include "temporal.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+{{- end }}

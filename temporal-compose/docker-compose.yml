@@ -1,0 +1,51 @@
+services:
+  temporal:
+    image: temporal-server:1.24.2
+    container_name: temporal-server
+    environment:
+      # Database type and connection
+      - DB=postgresql
+      - DB_PORT=${DB_PORT:-5432}
+      - POSTGRES_SEEDS=${DB_HOST:-postgres}
+      - POSTGRES_USER=${DB_USER:-temporal}
+      - POSTGRES_PWD=${DB_PASSWORD:-temporal}
+
+      # Database names
+      - DBNAME=temporal
+      - VISIBILITY_DBNAME=temporal_visibility
+
+      # Enable auto-setup (creates schemas automatically)
+      - SKIP_DB_CREATE=true
+      - SKIP_DEFAULT_NAMESPACE_CREATION=false
+
+      # Bind to all interfaces
+      - BIND_ON_IP=0.0.0.0
+    ports:
+      - "${TEMPORAL_FRONTEND_PORT:-7233}:7233"
+      - "${TEMPORAL_METRICS_PORT:-9090}:9090"
+    volumes:
+      - ../temporal-server/config:/etc/temporal/config:ro
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+  temporal-ui:
+    image: temporal-ui:2.30.0
+    container_name: temporal-ui
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=${TEMPORAL_CORS_ORIGINS:-http://localhost:3000}
+    ports:
+      - "${TEMPORAL_UI_PORT:-8080}:8080"
+    volumes:
+      - ../temporal-server/ui-config:/app/config:ro
+    networks:
+      - temporal-network
+    restart: unless-stopped
+
+networks:
+  temporal-network:
+    name: temporal-network
+    external: true

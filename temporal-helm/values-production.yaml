@@ -1,0 +1,292 @@
+# Production values for EKS deployment
+# This configures Temporal for production use with AWS RDS and Nexus images
+
+# IMPORTANT: Update the following values for your environment:
+# 1. global.imagePullSecrets - Your Nexus registry secret name
+# 2. server.image.repository - Your Nexus URL
+# 3. ui.image.repository - Your Nexus URL
+# 4. database.external.host - Your AWS RDS endpoint
+# 5. ui.ingress.hosts - Your domain name
+
+global:
+  # Nexus registry authentication
+  imagePullSecrets:
+    - name: nexus-registry-secret  # Create this secret first!
+
+server:
+  enabled: true
+
+  image:
+    repository: your-nexus-url.com/temporal-server  # REPLACE WITH YOUR NEXUS URL
+    tag: "1.24.2"
+    pullPolicy: IfNotPresent  # Use cached images if available
+
+  replicas: 3  # High availability with 3 replicas
+
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+  service:
+    type: ClusterIP
+    ports:
+      frontend: 7233
+      metrics: 9090
+
+  # Health checks
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+ui:
+  enabled: true
+
+  image:
+    repository: your-nexus-url.com/temporal-ui  # REPLACE WITH YOUR NEXUS URL
+    tag: "2.30.0"
+    pullPolicy: IfNotPresent
+
+  replicas: 2  # High availability with 2 replicas
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+  service:
+    type: ClusterIP  # Behind Ingress, no need for NodePort
+    port: 8080
+
+  ingress:
+    enabled: true
+    className: "nginx"  # Or "alb" for AWS ALB Ingress Controller
+    annotations:
+      # For NGINX Ingress Controller
+      nginx.ingress.kubernetes.io/rewrite-target: /
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+      # For AWS ALB Ingress Controller (uncomment if using ALB)
+      # alb.ingress.kubernetes.io/scheme: internet-facing
+      # alb.ingress.kubernetes.io/target-type: ip
+      # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+      # alb.ingress.kubernetes.io/ssl-redirect: '443'
+
+      # For cert-manager (uncomment if using)
+      # cert-manager.io/cluster-issuer: letsencrypt-prod
+
+    hosts:
+      - host: temporal-ui.your-company.com  # REPLACE WITH YOUR DOMAIN
+        paths:
+          - path: /
+            pathType: Prefix
+
+    # TLS configuration (uncomment after setting up certificates)
+    # tls:
+    #   - secretName: temporal-ui-tls
+    #     hosts:
+    #       - temporal-ui.your-company.com
+
+database:
+  external:
+    enabled: true
+
+    # AWS RDS PostgreSQL endpoint
+    host: "your-rds-instance.us-east-1.rds.amazonaws.com"  # REPLACE WITH YOUR RDS ENDPOINT
+    port: 5432
+
+    # Database names
+    defaultDatabase: temporal
+    visibilityDatabase: temporal_visibility
+
+    # Database user
+    user: temporal
+
+    # Use Kubernetes secret for password (recommended)
+    existingSecret: "temporal-db-credentials"  # Create this secret first!
+    # Or use plain password (NOT recommended for production):
+    # password: "your-password-here"
+
+    # SSL/TLS for database connection
+    ssl:
+      enabled: true
+      mode: require  # Options: disable, allow, prefer, require, verify-ca, verify-full
+
+# ============================================================================
+# SECURITY CONFIGURATION - Access Control
+# ============================================================================
+# Enable authentication for production deployments
+#
+security:
+  # Type 1: UI Access Control
+  ui:
+    authentication:
+      enabled: false  # Set to true to enable (see options below)
+
+      # Option A: Basic Authentication (Recommended for internal tools)
+      # Create secret:
+      #   htpasswd -c auth admin
+      #   kubectl create secret generic temporal-ui-basic-auth \
+      #     --from-file=auth=auth -n temporal
+      basicAuth:
+        enabled: false
+        existingSecret: "temporal-ui-basic-auth"
+        secretKey: "auth"
+
+      # Option B: OAuth/OIDC (Recommended for corporate SSO)
+      # Requires oauth2-proxy deployment
+      # Create secret:
+      #   kubectl create secret generic temporal-oauth \
+      #     --from-literal=client-id=xxx \
+      #     --from-literal=client-secret=yyy \
+      #     --from-literal=cookie-secret=$(openssl rand -base64 32) -n temporal
+      oauth:
+        enabled: false
+        provider: "oidc"  # google, github, azure, okta, oidc
+        issuerUrl: "https://login.microsoftonline.com/<tenant-id>/v2.0"  # Example for Azure AD
+        clientId: ""  # From your OAuth provider
+        existingSecret: "temporal-oauth"
+        emailDomains:
+          # - yourcompany.com  # Only allow company emails
+
+      # Option C: LDAP/Active Directory
+      # Create secret:
+      #   kubectl create secret generic temporal-ldap \
+      #     --from-literal=bind-password=xxx -n temporal
+      ldap:
+        enabled: false
+        host: "ldap.yourcompany.com"
+        port: 389
+        useTLS: true  # Recommended for production
+        baseDN: "dc=yourcompany,dc=com"
+        bindDN: "cn=temporal-svc,ou=serviceaccounts,dc=yourcompany,dc=com"
+        userSearchBase: "ou=users,dc=yourcompany,dc=com"
+        userSearchFilter: "(&(objectClass=user)(sAMAccountName={0}))"
+        existingSecret: "temporal-ldap"
+
+  # Type 2: Server Access Control
+  server:
+    authentication:
+      enabled: false  # Set to true to enable (see options below)
+
+      # Option A: Namespace Isolation (Always available, no setup needed)
+      # Recommended starting point - provides logical separation
+      namespaceIsolation:
+        enabled: true
+        # Create namespaces:
+        #   kubectl exec -it <temporal-pod> -- tctl namespace register team-a
+        #   kubectl exec -it <temporal-pod> -- tctl namespace register team-b
+
+      # Option B: mTLS (Recommended for production with external workers)
+      # Create secrets:
+      #   kubectl create secret generic temporal-ca \
+      #     --from-file=ca.crt=ca.crt -n temporal
+      #   kubectl create secret tls temporal-server-tls \
+      #     --cert=server.crt --key=server.key -n temporal
+      mtls:
+        enabled: false
+        requireClientAuth: true
+        ca:
+          existingSecret: "temporal-ca"
+        serverCert:
+          existingSecret: "temporal-server-tls"
+        frontend:
+          serverName: "temporal-server.yourcompany.com"
+
+# Monitoring (Optional - enable if you have Prometheus)
+monitoring:
+  enabled: false
+  prometheus:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+    # Example for AWS IAM role:
+    # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/temporal-sa-role
+  name: ""  # Auto-generated if empty
+
+# Advanced features (currently disabled - enable as needed)
+advanced:
+  authentication:
+    enabled: false
+    # Future: LDAP configuration
+
+  monitoring:
+    enabled: false
+    # Future: Prometheus ServiceMonitor
+
+  tls:
+    enabled: false
+    # Future: mTLS configuration
+
+# Worker deployment (optional - deploy your own workers separately)
+worker:
+  enabled: false
+
+# Pod disruption budget for high availability
+podDisruptionBudget:
+  server:
+    enabled: true
+    minAvailable: 2  # At least 2 server pods must be available during disruptions
+
+  ui:
+    enabled: true
+    minAvailable: 1  # At least 1 UI pod must be available
+
+# Affinity rules for high availability
+affinity:
+  server:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: temporal
+                app.kubernetes.io/component: server
+            topologyKey: kubernetes.io/hostname
+
+  ui:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: temporal
+                app.kubernetes.io/component: ui
+            topologyKey: kubernetes.io/hostname
+
+# Node selector (optional - target specific nodes)
+nodeSelector: {}
+  # Example:
+  # workload-type: temporal
+
+# Tolerations (optional - for tainted nodes)
+tolerations: []
+  # Example:
+  # - key: "dedicated"
+  #   operator: "Equal"
+  #   value: "temporal"
+  #   effect: "NoSchedule"

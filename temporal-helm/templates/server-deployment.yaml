@@ -1,0 +1,123 @@
+{{- if .Values.server.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "temporal.fullname" . }}-server
+  labels:
+    {{- include "temporal.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  replicas: {{ .Values.server.replicas }}
+  selector:
+    matchLabels:
+      {{- include "temporal.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "temporal.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "temporal.serviceAccountName" . }}
+      initContainers:
+      - name: config-init
+        image: alpine:3.19
+        command:
+        - sh
+        - -c
+        - |
+          apk add --no-cache gettext
+          envsubst < /config-template/development.yaml > /config/development.yaml
+          cat /config/development.yaml
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "temporal.database.secretName" . }}
+              key: password
+        volumeMounts:
+        - name: config-template
+          mountPath: /config-template
+          readOnly: true
+        - name: config
+          mountPath: /config
+      containers:
+      - name: temporal-server
+        image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
+        imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "temporal.database.secretName" . }}
+              key: password
+        ports:
+        - name: frontend
+          containerPort: 7233
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        volumeMounts:
+        - name: config
+          mountPath: /etc/temporal/config
+          readOnly: true
+        {{- if and .Values.security.server.authentication.enabled .Values.security.server.authentication.mtls.enabled }}
+        # mTLS Certificate Mounts
+        - name: server-tls-cert
+          mountPath: /etc/temporal/certs/server
+          readOnly: true
+        - name: ca-cert
+          mountPath: /etc/temporal/certs/ca
+          readOnly: true
+        {{- end }}
+        resources:
+          {{- toYaml .Values.server.resources | nindent 10 }}
+        {{- if .Values.server.livenessProbe.enabled }}
+        livenessProbe:
+          tcpSocket:
+            port: frontend
+          initialDelaySeconds: {{ .Values.server.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.server.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.server.livenessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.server.livenessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.server.readinessProbe.enabled }}
+        readinessProbe:
+          tcpSocket:
+            port: frontend
+          initialDelaySeconds: {{ .Values.server.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.server.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.server.readinessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.server.readinessProbe.failureThreshold }}
+        {{- end }}
+      volumes:
+      - name: config-template
+        configMap:
+          name: {{ include "temporal.fullname" . }}-server-config
+      - name: config
+        emptyDir: {}
+      {{- if and .Values.security.server.authentication.enabled .Values.security.server.authentication.mtls.enabled }}
+      # mTLS Certificate Volumes
+      - name: server-tls-cert
+        secret:
+          secretName: {{ .Values.security.server.authentication.mtls.serverCert.existingSecret }}
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
+      - name: ca-cert
+        secret:
+          secretName: {{ .Values.security.server.authentication.mtls.ca.existingSecret }}
+          items:
+          - key: ca.crt
+            path: ca.crt
+      {{- end }}
+{{- end }}

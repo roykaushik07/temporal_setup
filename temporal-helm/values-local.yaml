@@ -1,0 +1,95 @@
+# Local development values for k3d testing
+# This configures Temporal to connect to local PostgreSQL
+
+global:
+  imagePullSecrets: []  # No registry secrets needed for local images
+
+server:
+  enabled: true
+
+  image:
+    repository: temporal-server  # Local image name
+    tag: "1.24.2"
+    pullPolicy: Never  # Don't try to pull, use local image
+
+  replicas: 1  # Just 1 replica for local testing
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  service:
+    type: ClusterIP
+    ports:
+      frontend: 7233
+      metrics: 9090
+
+ui:
+  enabled: true
+
+  image:
+    repository: temporal-ui  # Local image name
+    tag: "2.30.0"
+    pullPolicy: Never  # Don't try to pull, use local image
+
+  replicas: 1  # Just 1 replica for local testing
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+  service:
+    type: NodePort  # Use NodePort for easy access
+    port: 8080
+
+  ingress:
+    enabled: false  # No ingress for local
+
+database:
+  external:
+    enabled: true
+    # Connect to PostgreSQL running in Docker on host
+    # k3d can reach host via host.k3d.internal
+    host: "host.k3d.internal"
+    port: 5432
+    defaultDatabase: temporal
+    visibilityDatabase: temporal_visibility
+    user: temporal
+    password: "temporal"  # OK for local dev
+    existingSecret: ""  # Don't use existing secret, use password above
+    ssl:
+      enabled: false
+
+# Security features disabled for local testing
+security:
+  ui:
+    authentication:
+      enabled: false
+      basicAuth:
+        enabled: false
+      oauth:
+        enabled: false
+      ldap:
+        enabled: false
+  server:
+    authentication:
+      enabled: false
+      namespaceIsolation:
+        enabled: true  # Always available
+      mtls:
+        enabled: false
+
+# Monitoring disabled for local testing
+monitoring:
+  enabled: false
+
+worker:
+  enabled: false  # Don't deploy worker for now

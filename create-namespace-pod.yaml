@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: create-namespace
+  namespace: temporal
+spec:
+  restartPolicy: Never
+  containers:
+  - name: python
+    image: python:3.9-slim
+    command:
+    - /bin/bash
+    - -c
+    - |
+      pip install temporalio==1.7.1
+      python3 -c '
+      import asyncio
+      from temporalio.client import Client
+      from temporalio.api.workflowservice.v1 import RegisterNamespaceRequest
+      from google.protobuf.duration_pb2 import Duration
+
+      async def main():
+          client = await Client.connect("temporal-server.temporal.svc.cluster.local:7233")
+          try:
+              retention = Duration()
+              retention.seconds = 7 * 24 * 60 * 60  # 7 days
+
+              request = RegisterNamespaceRequest(
+                  namespace="default",
+                  workflow_execution_retention_period=retention
+              )
+              await client._impl.service_client.workflow_service.register_namespace(request)
+              print("✅ Namespace created!")
+          except Exception as e:
+              error_str = str(e).lower()
+              if "already" in error_str or "exists" in error_str or "registered" in error_str:
+                  print("✅ Already exists")
+              else:
+                  print(f"Error: {e}")
+                  raise
+
+      asyncio.run(main())
+      '
